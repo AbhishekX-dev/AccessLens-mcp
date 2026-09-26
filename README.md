@@ -37,7 +37,8 @@ policy empirically auditable over time.
 ## Human-review gate
 
 AccessLens follows **report → human review → approved remediation → verify**.
-After every scan, an agent must call `get_review_report`, show it to the human,
+After every scan, an agent must call `run_accessibility_review` (or
+`get_review_report` after a legacy scan), show it to the human,
 and wait. Only explicit human decisions may be recorded with
 `record_human_review`. `verify_fix` refuses to run for a finding without an
 approved review record. This makes the intended MCP workflow human-in-the-loop;
@@ -51,6 +52,9 @@ excluded or treated as agreement.
 
 ## Tools
 
+- `run_accessibility_review`: recommended one-call workflow. Renders the target
+  once with Playwright and returns engine status, traceable grouped issues,
+  session checks, advisory checks, and a pending-human-review report.
 - `analyze_accessibility_evidence`: scan a URL or HTML, collect evidence, and
   store a snapshot in a session.
 - `verify_fix`: re-scan an explicit updated URL/HTML and compare the original

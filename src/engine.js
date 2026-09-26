@@ -60,7 +60,10 @@ async function semanticSnapshot(page) {
   });
 }
 
-function fingerprint(node) { return hash(node.html || node.target?.join("|") || "document"); }
+// A selector is part of the identity. Identical markup can appear many times
+// (for example, status pills in a list); using HTML alone incorrectly merges
+// distinct axe nodes into a single remediation target.
+function fingerprint(node) { return hash(`${node.target?.join("|") || "document"}|${node.html || ""}`); }
 function normalizeAxe(results) {
   return results.violations.flatMap((violation) => violation.nodes.map((node) => ({
     schema_version: SCHEMA_VERSION,
@@ -100,6 +103,23 @@ function semanticFindings(snapshot) {
   const mains = snapshot.landmarks.filter((x) => x.role === "main");
   if (mains.length > 1) output.push(semanticFinding("multiple-main-landmarks", ["wcag131"], "serious", mains.map((m) => m.path).join("|"), "More than one main landmark", "A page normally exposes one primary main landmark."));
   return output;
+}
+
+export function advisoriesFromSnapshot(snapshot) {
+  const focusable = snapshot.controls.filter((control) => control.visible && control.tabIndex >= 0);
+  const tabOrder = [...focusable].sort((a, b) => a.tabIndex - b.tabIndex || a.path.localeCompare(b.path));
+  const visualOrder = [...focusable].sort((a, b) => a.y - b.y || a.x - b.x);
+  const readingOrderMismatches = tabOrder.filter((item, index) => visualOrder[index]?.path !== item.path).map((item, index) => ({ tab_position: index + 1, tab_path: item.path, visual_path: visualOrder[index]?.path }));
+  const suspiciousAlt = snapshot.images.filter((image) => !image.decorative && (!image.alt.trim() || /^(image|photo|picture|img)(\s*\d*)?$/i.test(image.alt.trim()))).map((image) => ({ ...image, reason: !image.alt.trim() ? "missing alternative text" : "generic alternative text" }));
+  const unnamedControls = snapshot.controls.filter((control) => control.visible && !control.name.trim()).map((control) => ({ role: control.role, path: control.path }));
+  const repeatedNames = Object.entries(Object.groupBy(snapshot.controls.filter((control) => control.name), (control) => `${control.role}:${control.name.toLowerCase()}`)).filter(([, controls]) => controls.length > 1).map(([name, controls]) => ({ name, count: controls.length, paths: controls.map((control) => control.path) }));
+  const potentiallyUnreachable = snapshot.controls.filter((control) => control.visible && control.tabIndex < 0 && ["button", "a"].includes(control.role)).map((control) => ({ role: control.role, name: control.name, path: control.path }));
+  return {
+    reading_order: { type: "advisory", limitation: "Compares static focus/DOM order with rendered bounding-box order; it does not replace human reading-order assessment.", mismatches: readingOrderMismatches },
+    alt_text: { type: "advisory", limitation: "Flags missing or generic alt text only; no vision model assesses truthfulness.", findings: suspiciousAlt },
+    control_names: { type: "advisory", limitation: "Reports missing or repeated static names; it cannot prove a name is contextually clear.", unnamed_controls: unnamedControls, repeated_names: repeatedNames },
+    keyboard: { type: "advisory", limitation: "Static reachability check only; it does not exercise interactive behavior such as Escape handling.", potentially_unreachable_controls: potentiallyUnreachable },
+  };
 }
 
 async function qualwebFindings(target) {
@@ -144,7 +164,7 @@ export async function scan(input, { calibration = {} } = {}) {
     const semantic = semanticFindings(snapshot);
     const qualweb = await qualwebFindings(target);
     const findings = fuseEvidence([...axeFindings, ...semantic, ...qualweb.findings], calibration);
-    return { target: { kind: target.kind, value: target.value, resolved_url: pageUrl }, scanned_at: new Date().toISOString(), findings, snapshot, engine_runs: [{ engine: "axe-core", version: axe.version, status: "completed", violations: axeFindings.length, render_context: "Playwright page" }, { engine: "accesslens-semantic", version: "0.1.0", status: "completed", violations: semantic.length, render_context: "Playwright semantic snapshot" }, qualweb.run], fusion_protocol: "EFP-1", fusion_note: "Corroboration is only claimed across distinct methodologies; calibration is learned from verification outcomes." };
+    return { target: { kind: target.kind, value: target.value, resolved_url: pageUrl }, scanned_at: new Date().toISOString(), findings, snapshot, advisories: advisoriesFromSnapshot(snapshot), engine_runs: [{ engine: "axe-core", version: axe.version, status: "completed", violations: axeFindings.length, render_context: "Playwright page" }, { engine: "accesslens-semantic", version: "0.1.0", status: "completed", violations: semantic.length, render_context: "Playwright semantic snapshot" }, qualweb.run], fusion_protocol: "EFP-1", fusion_note: "Corroboration is only claimed across distinct methodologies; calibration is learned from verification outcomes." };
   });
 }
 

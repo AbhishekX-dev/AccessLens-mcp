@@ -12,6 +12,14 @@ test("fusion only calls corroboration cross-method when methods differ", () => {
   assert.equal(output[0].fusion.status, "cross-method corroborated");
 });
 
+test("fusion preserves repeated elements with different DOM fingerprints", () => {
+  const output = fuseEvidence([
+    { rule_id: "color-contrast", criterion: ["wcag143"], dom_fingerprint: "first", engine_evidence: [{ engine: "axe", methodology: "rule-engine" }] },
+    { rule_id: "color-contrast", criterion: ["wcag143"], dom_fingerprint: "second", engine_evidence: [{ engine: "axe", methodology: "rule-engine" }] },
+  ]);
+  assert.equal(output.length, 2);
+});
+
 test("calibration is learned from verified outcomes", () => {
   assert.equal(updateCalibration([{ status: "verified", supporting_engines: ["axe"] }]).axe.precision, 1);
 });

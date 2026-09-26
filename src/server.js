@@ -8,6 +8,7 @@ const store = new SessionStore();
 const session = (args) => args.session_id || "default";
 const targetSchema = { type: "object", properties: { url_or_html: { type: "string", description: "A public http(s) URL, or an HTML document." }, session_id: { type: "string" } }, required: ["url_or_html"] };
 const tools = [
+  ["run_accessibility_review", "Preferred one-call workflow. Render a URL or HTML once with Playwright; run axe-core, AccessLens structural/session checks, QualWeb ACT Rules when an URL is supplied, and static reading-order, alt-text, control-name, and keyboard advisories. Returns one human-review report. Do not edit code; present the report and wait for explicit approval.", targetSchema],
   ["analyze_accessibility_evidence", "Render a URL or HTML document, run axe-core plus AccessLens semantic checks (and QualWeb ACT Rules for URL scans), preserve raw per-engine provenance, and persist a pending-human-review report. Do not modify code: present get_review_report to the human first.", targetSchema],
   ["get_review_report", "Create the human-facing review packet: each open finding, evidence, proposed safe remediation category, and its approval status. An agent must show this report and ask for explicit human approval before editing code.", { type: "object", properties: { session_id: { type: "string" } } }],
   ["record_human_review", "Record an explicit human decision after the human has reviewed the report. Only call this tool in response to a clear human approval or rejection; it is not permission for the agent to decide on its own.", { type: "object", properties: { finding_ids: { type: "array", items: { type: "string" }, minItems: 1 }, decision: { type: "string", enum: ["approved", "rejected"] }, note: { type: "string" }, session_id: { type: "string" } }, required: ["finding_ids", "decision"] }],
@@ -42,22 +43,38 @@ function consistency(id) {
   return { session_id: id, scans_checked: scans.length, issues };
 }
 
-function reviewReport(id) {
+function reviewReport(id, scan = store.session(id).scans.at(-1)) {
   const s = store.session(id);
-  const latest = s.scans.at(-1);
+  const latest = scan;
+  const groups = new Map();
+  for (const finding of latest?.findings || []) {
+    const key = `${finding.rule_id}|${finding.summary}|${finding.severity}`;
+    const group = groups.get(key) || { issue_id: `issue:${key}`, rule_id: finding.rule_id, summary: finding.summary, severity: finding.severity, wcag_criteria: finding.criterion, finding_ids: [], affected_elements: [], engines: new Set(), evidence_statuses: new Set() };
+    group.finding_ids.push(finding.finding_id);
+    group.affected_elements.push({ target: finding.target, detail: finding.detail, html: finding.html });
+    for (const evidence of finding.engine_evidence) group.engines.add(evidence.engine);
+    group.evidence_statuses.add(finding.fusion?.status || "single-engine");
+    groups.set(key, group);
+  }
   return {
     session_id: id,
+    target: latest?.target,
+    scanned_at: latest?.scanned_at,
     policy: "Human approval is required before remediation. The agent must present this report and wait for a clear decision before editing code.",
-    findings: (latest?.findings || []).map((finding) => ({
-      finding_id: finding.finding_id, summary: finding.summary, severity: finding.severity, target: finding.target,
-      evidence: finding.fusion, review: s.reviews.get(finding.finding_id) || { decision: "pending_review" },
-      proposed_remediation_category: finding.fusion?.status === "cross-method corroborated" ? "candidate mechanical fix; still needs human approval" : "requires human judgment before remediation",
-    })),
+    engine_summary: latest?.engine_runs || [],
+    automated_issue_count: latest?.findings.length || 0,
+    issues: [...groups.values()].map((group) => ({ ...group, engines: [...group.engines], evidence_statuses: [...group.evidence_statuses], review: group.finding_ids.every((findingId) => s.reviews.get(findingId)?.decision === "approved") ? { decision: "approved" } : { decision: "pending_review" }, proposed_remediation_category: "Review the affected elements and approve or reject this issue before code changes." })),
+    advisory_checks: latest?.advisories || {},
+    limitations: ["Automated results are evidence, not a declaration of WCAG conformance.", "A passing control-name check means no static issue was detected; it does not prove contextual clarity.", "An engine marked not-run was not silently treated as a pass."],
   };
 }
 
 async function call(name, args = {}) {
   const id = session(args);
+  if (name === "run_accessibility_review") {
+    const completedScan = store.addScan(id, await scan(args.url_or_html, { calibration: updateCalibration([...store.session(id).outcomes.values()]) }));
+    return json({ ...reviewReport(id, completedScan), session_consistency: consistency(id) });
+  }
   if (name === "analyze_accessibility_evidence") return json(store.addScan(id, await scan(args.url_or_html, { calibration: updateCalibration([...store.session(id).outcomes.values()]) })));
   if (name === "get_review_report") return json(reviewReport(id));
   if (name === "record_human_review") {
