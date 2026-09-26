@@ -15,6 +15,12 @@ After it is published to npm, a client can launch it directly with
 `npx -y accesslens-mcp`. The setup command downloads Playwright Chromium once;
 the browser is required to scan rendered pages.
 
+Until the npm package is published, use the GitHub package spec instead:
+
+```powershell
+npx -y github:AbhishekX-dev/AccessLens-mcp --install-browser
+```
+
 ## Add to an MCP client
 
 ```json
