@@ -1,11 +1,15 @@
 {
   "name": "accesslens-mcp",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Evidence-driven accessibility verification MCP server.",
-  "bin": { "accesslens-mcp": "./src/server.js" },
-  "scripts": { "start": "node src/server.js", "test": "node --test" },
+  "bin": { "accesslens-mcp": "./bin/accesslens-mcp.js" },
+  "files": ["bin", "src", "README.md", "LICENSE"],
+  "keywords": ["mcp", "accessibility", "wcag", "axe-core", "qualweb", "playwright", "ai-agent"],
+  "repository": { "type": "git", "url": "git+https://github.com/AbhishekX-dev/AccessLens-mcp.git" },
+  "bugs": { "url": "https://github.com/AbhishekX-dev/AccessLens-mcp/issues" },
+  "homepage": "https://github.com/AbhishekX-dev/AccessLens-mcp#readme",
+  "scripts": { "start": "node src/server.js", "setup-browser": "node bin/accesslens-mcp.js --install-browser", "test": "node --test" },
   "engines": { "node": ">=20" },
   "dependencies": { "@qualweb/act-rules": "^0.8.5", "@qualweb/core": "^0.8.4", "axe-core": "^4.10.2", "playwright": "^1.52.0" },
   "devDependencies": {}

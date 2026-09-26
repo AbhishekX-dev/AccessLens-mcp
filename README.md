@@ -8,9 +8,12 @@ compares the evidence after a fix.
 ## Install
 
 ```powershell
-npm install
-npx playwright install chromium
+npx accesslens-mcp --install-browser
 ```
+
+After it is published to npm, a client can launch it directly with
+`npx -y accesslens-mcp`. The setup command downloads Playwright Chromium once;
+the browser is required to scan rendered pages.
 
 ## Add to an MCP client
 
@@ -18,8 +21,8 @@ npx playwright install chromium
 {
   "mcpServers": {
     "accesslens": {
-      "command": "node",
-      "args": ["C:/Users/Abhishek Bandaswami/Desktop/AcessLens-mcp/src/server.js"]
+      "command": "npx",
+      "args": ["-y", "accesslens-mcp"]
     }
   }
 }
