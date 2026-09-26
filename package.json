@@ -1,0 +1,12 @@
+{
+  "name": "accesslens-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Evidence-driven accessibility verification MCP server.",
+  "bin": { "accesslens-mcp": "./src/server.js" },
+  "scripts": { "start": "node src/server.js", "test": "node --test" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "@qualweb/act-rules": "^0.8.5", "@qualweb/core": "^0.8.4", "axe-core": "^4.10.2", "playwright": "^1.52.0" },
+  "devDependencies": {}
+}

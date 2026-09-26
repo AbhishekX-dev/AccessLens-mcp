@@ -1,0 +1,4 @@
+node_modules/
+.accesslens/
+playwright-report/
+test-results/
