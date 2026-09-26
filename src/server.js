@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import readline from "node:readline";
-import { advisory, scan } from "./engine.js";
+import { advisory, crawl, scan } from "./engine.js";
 import { SessionStore } from "./store.js";
 import { updateCalibration } from "./fusion.js";
 
 const store = new SessionStore();
 const session = (args) => args.session_id || "default";
 const targetSchema = { type: "object", properties: { url_or_html: { type: "string", description: "A public http(s) URL, or an HTML document." }, session_id: { type: "string" } }, required: ["url_or_html"] };
+const crawlSchema = { type: "object", properties: { start_url: { type: "string", description: "The http(s) URL where same-origin crawling begins." }, max_pages: { type: "integer", minimum: 1, maximum: 25, default: 10 }, max_depth: { type: "integer", minimum: 0, maximum: 5, default: 2 }, session_id: { type: "string" } }, required: ["start_url"] };
 const tools = [
+  ["crawl_accessibility_review", "Crawl ordinary same-origin anchor links breadth-first from a start URL, within explicit page/depth limits. Runs the same Playwright, axe-core, QualWeb, structural, and advisory review on every discovered page, then returns one combined pending-human-review report. External links and unlinked SPA routes are not guessed.", crawlSchema],
   ["run_accessibility_review", "Preferred one-call workflow. Render a URL or HTML once with Playwright; run axe-core, AccessLens structural/session checks, QualWeb ACT Rules when an URL is supplied, and static reading-order, alt-text, control-name, and keyboard advisories. Returns one human-review report. Do not edit code; present the report and wait for explicit approval.", targetSchema],
   ["analyze_accessibility_evidence", "Render a URL or HTML document, run axe-core plus AccessLens semantic checks (and QualWeb ACT Rules for URL scans), preserve raw per-engine provenance, and persist a pending-human-review report. Do not modify code: present get_review_report to the human first.", targetSchema],
   ["get_review_report", "Create the human-facing review packet: each open finding, evidence, proposed safe remediation category, and its approval status. An agent must show this report and ask for explicit human approval before editing code.", { type: "object", properties: { session_id: { type: "string" } } }],
@@ -69,8 +71,36 @@ function reviewReport(id, scan = store.session(id).scans.at(-1)) {
   };
 }
 
+function crawlReviewReport(id, crawlResult, storedPages) {
+  const groups = new Map();
+  for (const page of storedPages) for (const finding of page.findings) {
+    const key = `${finding.rule_id}|${finding.summary}|${finding.severity}`;
+    const group = groups.get(key) || { rule_id: finding.rule_id, summary: finding.summary, severity: finding.severity, wcag_criteria: finding.criterion, finding_ids: [], affected_elements: [], engines: new Set() };
+    group.finding_ids.push(finding.finding_id);
+    group.affected_elements.push({ page_url: page.target.resolved_url, target: finding.target, detail: finding.detail, html: finding.html });
+    for (const evidence of finding.engine_evidence) group.engines.add(evidence.engine);
+    groups.set(key, group);
+  }
+  const s = store.session(id);
+  return {
+    session_id: id,
+    policy: "Human approval is required before remediation. The agent must present this report and wait for a clear decision before editing code.",
+    crawl: { start_url: crawlResult.start_url, same_origin: crawlResult.same_origin, pages_scanned: storedPages.length, max_pages: crawlResult.max_pages, max_depth: crawlResult.max_depth, truncated: crawlResult.truncated, errors: crawlResult.errors },
+    pages: storedPages.map((page) => ({ url: page.target.resolved_url, title: page.snapshot.title, depth: page.crawl_depth, automated_issue_count: page.findings.length, engine_summary: page.engine_runs })),
+    automated_issue_count: storedPages.reduce((total, page) => total + page.findings.length, 0),
+    issues: [...groups.values()].map((group) => ({ ...group, engines: [...group.engines], review: group.finding_ids.every((findingId) => s.reviews.get(findingId)?.decision === "approved") ? { decision: "approved" } : { decision: "pending_review" }, proposed_remediation_category: "Review the affected elements and approve or reject this issue before code changes." })),
+    session_consistency: consistency(id),
+    limitations: ["The crawler follows only same-origin anchor links; it does not infer unlinked SPA routes or authenticate.", "Automated results are evidence, not a declaration of WCAG conformance.", "An engine marked not-run was not silently treated as a pass."],
+  };
+}
+
 async function call(name, args = {}) {
   const id = session(args);
+  if (name === "crawl_accessibility_review") {
+    const crawled = await crawl(args.start_url, { maxPages: args.max_pages, maxDepth: args.max_depth, calibration: updateCalibration([...store.session(id).outcomes.values()]) });
+    const storedPages = crawled.pages.map((page) => store.addScan(id, page));
+    return json(crawlReviewReport(id, crawled, storedPages));
+  }
   if (name === "run_accessibility_review") {
     const completedScan = store.addScan(id, await scan(args.url_or_html, { calibration: updateCalibration([...store.session(id).outcomes.values()]) }));
     return json({ ...reviewReport(id, completedScan), session_consistency: consistency(id) });

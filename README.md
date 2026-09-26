@@ -64,6 +64,10 @@ excluded or treated as agreement.
 - `run_accessibility_review`: recommended one-call workflow. Renders the target
   once with Playwright and returns engine status, traceable grouped issues,
   session checks, advisory checks, and a pending-human-review report.
+- `crawl_accessibility_review`: crawls same-origin anchor links breadth-first
+  (default: 10 pages, depth 2), runs the full review on every discovered page,
+  and returns one combined pending-human-review report. It never follows
+  external links or invents unlinked SPA routes.
 - `analyze_accessibility_evidence`: scan a URL or HTML, collect evidence, and
   store a snapshot in a session.
 - `verify_fix`: re-scan an explicit updated URL/HTML and compare the original

@@ -55,6 +55,7 @@ async function semanticSnapshot(page) {
         const r = e.getBoundingClientRect();
         return { role: e.getAttribute("role") || e.tagName.toLowerCase(), name: name(e), path: path(e), tabIndex: e.tabIndex, x: Math.round(r.x), y: Math.round(r.y), visible: !!(r.width && r.height) };
       }),
+      links: [...document.querySelectorAll("a[href]")].map((e) => e.href),
       images: [...document.images].map((e) => ({ alt: e.alt, decorative: e.getAttribute("role") === "presentation" || e.getAttribute("aria-hidden") === "true", src: e.currentSrc || e.src, path: path(e) })),
     };
   });
@@ -166,6 +167,48 @@ export async function scan(input, { calibration = {} } = {}) {
     const findings = fuseEvidence([...axeFindings, ...semantic, ...qualweb.findings], calibration);
     return { target: { kind: target.kind, value: target.value, resolved_url: pageUrl }, scanned_at: new Date().toISOString(), findings, snapshot, advisories: advisoriesFromSnapshot(snapshot), engine_runs: [{ engine: "axe-core", version: axe.version, status: "completed", violations: axeFindings.length, render_context: "Playwright page" }, { engine: "accesslens-semantic", version: "0.1.0", status: "completed", violations: semantic.length, render_context: "Playwright semantic snapshot" }, qualweb.run], fusion_protocol: "EFP-1", fusion_note: "Corroboration is only claimed across distinct methodologies; calibration is learned from verification outcomes." };
   });
+}
+
+function crawlUrl(rawUrl, origin) {
+  try {
+    const url = new URL(rawUrl);
+    url.hash = "";
+    if (url.origin !== origin || !["http:", "https:"].includes(url.protocol)) return null;
+    return url.href;
+  } catch { return null; }
+}
+
+/** Crawl ordinary same-origin anchor links breadth-first. SPA routes with no
+ * anchor are intentionally not guessed; callers can scan those URLs directly. */
+export async function crawl(startUrl, { maxPages = 10, maxDepth = 2, calibration = {} } = {}) {
+  const root = validateTarget(startUrl);
+  if (root.kind !== "url") throw new Error("Multi-page crawl requires an http(s) start_url, not HTML input.");
+  const pageLimit = Math.max(1, Math.min(Number(maxPages) || 10, 25));
+  const depthLimit = Math.max(0, Math.min(Number(maxDepth) || 2, 5));
+  const origin = new URL(root.value).origin;
+  const queue = [{ url: root.value, depth: 0 }];
+  const queued = new Set([root.value]);
+  const visited = new Set();
+  const scans = [];
+  const errors = [];
+  while (queue.length && scans.length < pageLimit) {
+    const current = queue.shift();
+    if (visited.has(current.url)) continue;
+    visited.add(current.url);
+    try {
+      const result = await scan(current.url, { calibration });
+      scans.push({ ...result, crawl_depth: current.depth });
+      if (current.depth >= depthLimit) continue;
+      for (const href of result.snapshot.links) {
+        const nextUrl = crawlUrl(href, origin);
+        if (nextUrl && !visited.has(nextUrl) && !queued.has(nextUrl) && queue.length + scans.length < pageLimit) {
+          queued.add(nextUrl);
+          queue.push({ url: nextUrl, depth: current.depth + 1 });
+        }
+      }
+    } catch (error) { errors.push({ url: current.url, depth: current.depth, error: error.message }); }
+  }
+  return { start_url: root.value, same_origin: origin, max_pages: pageLimit, max_depth: depthLimit, pages: scans, errors, truncated: queue.length > 0 };
 }
 
 export async function advisory(input, kind) {

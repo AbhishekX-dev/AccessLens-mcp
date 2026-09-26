@@ -15,6 +15,7 @@ test("MCP stdio server advertises the evidence-fusion tools", async () => {
   });
   child.kill();
   const list = lines.find((line) => line.id === 2).result.tools;
+  assert.ok(list.some((tool) => tool.name === "crawl_accessibility_review"));
   assert.ok(list.some((tool) => tool.name === "run_accessibility_review"));
   assert.ok(list.some((tool) => tool.name === "analyze_accessibility_evidence"));
   assert.ok(list.some((tool) => tool.name === "get_review_report"));
